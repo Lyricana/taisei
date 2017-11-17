@@ -103,9 +103,11 @@ int projectile_prio_func(void *vproj) {
 }
 
 static Projectile* _create_projectile(ProjArgs *args) {
+#ifdef PROJ_DEBUG
 	if(IN_DRAW_CODE) {
 		log_fatal("Tried to spawn a projectile while in drawing code");
 	}
+#endif
 
 	Projectile *p = create_element_at_priority(
 		(void**)args->dest, sizeof(Projectile),

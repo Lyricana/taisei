@@ -137,7 +137,10 @@ static int youmu_trap(Projectile *p, int t) {
 static void YoumuSlash(Enemy *e, int t, bool render) {
     if(render) {
         t = player_get_bomb_progress(&global.plr, NULL);
-        fade_out(10.0/t+sin(t/10.0)*0.1);
+
+        if(t) {
+            fade_out(10.0/t+sin(t/10.0)*0.1);
+        }
     }
 }
 
