@@ -403,7 +403,7 @@ int asymptotic(Projectile *p, int t) { // v = a[0]*(a[1] + 1); a[1] -> 0
 		return 1;
 	p->angle = carg(p->args[0]);
 
-	p->args[1] *= 0.8;
+	p->args[1] = I*cimag(p->args[1]) + creal(p->args[1]) * 0.8;
 	p->pos += p->args[0]*(p->args[1] + 1);
 
 	return 1;
@@ -433,7 +433,7 @@ static inline void apply_common_transforms(Projectile *proj, int t) {
 
 static inline void apply_color(Projectile *proj, Color c) {
 	static ColorTransform ct;
-	proj->color_transform_rule(proj, proj->birthtime - global.frames, c, &ct);
+	proj->color_transform_rule(proj, global.frames - proj->birthtime, c, &ct);
 	recolor_apply_transform(&ct);
 }
 
@@ -576,32 +576,42 @@ void Petal(Projectile *p, int t) {
 	float r = sqrt(x*x+y*y+z*z);
 	x /= r; y /= r; z /= r;
 
+	float scale = cimag(p->args[1]);
+
 	glDisable(GL_CULL_FACE);
 	glPushMatrix();
 	glTranslatef(creal(p->pos), cimag(p->pos),0);
 	glRotatef(t*4.0 + cimag(p->args[3]), x, y, z);
+	glScalef(scale, scale, scale);
 	ProjDrawCore(p, p->color);
 	glPopMatrix();
 	glEnable(GL_CULL_FACE);
 }
 
-void petal_explosion(int n, complex pos) {
-	int i;
-	for(i = 0; i < n; i++) {
+void petal_explosion_ex(int n, complex pos, float speed, float boost, float size, float size_fuzz) {
+	for(int i = 0; i < n; i++) {
 		tsrand_fill(6);
 		float t = frand();
 		Color c = rgba(sin(5*t),cos(5*t),0.5,t);
 
+		float scale = size + size_fuzz * nfrand();
+
 		PARTICLE("petal", pos, c, asymptotic,
 			.draw_rule = Petal,
 			.args = {
-				(3+5*afrand(2))*cexp(I*M_PI*2*afrand(3)),
-				5,
-				afrand(4) + afrand(5)*I, afrand(1) + 360.0*I*afrand(0),
+				speed * (3+5*afrand(2))*cexp(I*M_PI*2*afrand(3)),
+				boost * 5 + I * scale, // XXX: WE NEED MORE FUCKING ARGS
+				afrand(4) + afrand(5)*I,
+				afrand(1) + 360.0*I*afrand(0),
 			},
 			.flags = PFLAG_DRAWADD,
+			.type = PlrProj, // hack: never reflect these in stage1 water (GL_CULL_FACE conflict)
 		);
 	}
+}
+
+void petal_explosion(int n, complex pos) {
+	petal_explosion_ex(n, pos, 1, 1, 1, 0);
 }
 
 void projectiles_preload(void) {

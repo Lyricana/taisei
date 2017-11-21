@@ -134,6 +134,7 @@ void ScaleFade(Projectile *p, int t);
 
 void Petal(Projectile *p, int t);
 void petal_explosion(int n, complex pos);
+void petal_explosion_ex(int n, complex pos, float speed, float boost, float size, float size_fuzz);
 
 int timeout(Projectile *p, int t);
 int timeout_linear(Projectile *p, int t);

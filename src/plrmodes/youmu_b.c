@@ -37,25 +37,41 @@ static complex youmu_homing_target(complex org, complex fallback) {
     return target;
 }
 
-static void youmu_homing_draw_common(Projectile *p, int t, float clrfactor, float alpha) {
-    Color oldcolor = p->color;
-    p->color = multiply_colors(oldcolor, rgba(0.7f + 0.3f * clrfactor, 0.9f + 0.1f * clrfactor, 1, alpha));
-    ProjDraw(p, t);
-    p->color = oldcolor;
+static void youmu_homing_draw_common(Projectile *p, int t, float clrfactor, float scale, float alpha) {
+    Color c = multiply_colors(p->color, rgba(0.7f + 0.3f * clrfactor, 0.9f + 0.1f * clrfactor, 1, alpha));
+
+    glPushMatrix();
+    glTranslatef(creal(p->pos), cimag(p->pos), 0);
+    glRotatef(p->angle*180/M_PI+90, 0, 0, 1);
+    glScalef(scale, scale, 1);
+    ProjDrawCore(p, c);
+    glPopMatrix();
 }
 
 static void youmu_homing_draw_proj(Projectile *p, int t) {
     float a = clamp(1.0f - (float)t / p->args[2], 0, 1);
-    youmu_homing_draw_common(p, t, a, 0.5f);
+    youmu_homing_draw_common(p, t, a, 1, 0.5f);
 }
 
 static void youmu_homing_draw_trail(Projectile *p, int t) {
     float a = clamp(1.0f - (float)t / p->args[0], 0, 1);
-    youmu_homing_draw_common(p, t, a, 0.15f * a);
+    youmu_homing_draw_common(p, t, a, 5 * (1 - a), 0.15f * a);
 }
 
-static void youmu_homing_trail(Projectile *p, complex v, int to) {
-    PARTICLE(
+static void youmu_trap_draw_trail(Projectile *p, int t) {
+    float a = clamp(1.0f - (float)t / p->args[0], 0, 1);
+    youmu_homing_draw_common(p, t, a, 2 - a, 0.15f * a);
+}
+
+static void youmu_trap_draw_child_proj(Projectile *p, int t) {
+    float to = p->args[2];
+    float a = clamp(1.0 - 3 * ((t - (to - to/3)) / to), 0, 1);
+    a = 1 - pow(1 - a, 2);
+    youmu_homing_draw_common(p, t, a, 1 + 2 * pow(1 - a, 2), a);
+}
+
+static Projectile* youmu_homing_trail(Projectile *p, complex v, int to) {
+    return PARTICLE(
         .texture_ptr = p->tex,
         .pos = p->pos,
         .color = p->color,
@@ -64,6 +80,8 @@ static void youmu_homing_trail(Projectile *p, complex v, int to) {
         .draw_rule = youmu_homing_draw_trail,
         .args = { to, v },
         .type = PlrProj,
+        // .flags = p->flags,
+        .color_transform_rule = p->color_transform_rule,
     );
 }
 
@@ -87,8 +105,51 @@ static int youmu_homing(Projectile *p, int t) { // a[0]: velocity, a[1]: aim (r:
     p->angle = carg(p->args[0]);
     p->pos += p->args[0];
 
-    youmu_homing_trail(p, 0.5 * p->args[0], 12);
+    Projectile *trail = youmu_homing_trail(p, 0.5 * p->args[0], 12);
+    trail->args[2] = p->args[2];
+
     return 1;
+}
+
+static float youmu_trap_charge(int t) {
+    return pow(clamp(t / 60.0, 0, 1), 1.5);
+}
+
+static void youmu_trap_clr_transform_common(Projectile *p, int t, Color c, ColorTransform *out, float charge) {
+    Color c_r = c & CLRMASK_R;
+    Color c_g = c & CLRMASK_G;
+    Color c_b = c & CLRMASK_B;
+    Color c_a = c & CLRMASK_A;
+
+    memcpy(out, (&(ColorTransform) {
+        .R[1] = mix_colors(c_b, c_r, sqrt(charge)),
+        .G[1] = c_g,
+        .B[1] = mix_colors(multiply_colors(c_r, rgba(2, 0, 0, 0)), c_b, 0.75 * charge),
+        .A[1] = c_a,
+    }), sizeof(ColorTransform));
+}
+
+static void youmu_trap_clr_transform(Projectile *p, int t, Color c, ColorTransform *out) {
+    float charge = youmu_trap_charge(t);
+    youmu_trap_clr_transform_common(p, t, c, out, charge);
+}
+
+static void youmu_trap_trail_clr_transform(Projectile *p, int t, Color c, ColorTransform *out) {
+    float charge = youmu_trap_charge(t + p->args[3]);
+    youmu_trap_clr_transform_common(p, t, c, out, charge);
+}
+
+static void youmu_trap_proj_clr_transform(Projectile *p, int t, Color c, ColorTransform *out) {
+    float charge = cimag(p->args[2]);
+    youmu_trap_clr_transform_common(p, t, c, out, charge);
+}
+
+static Projectile* youmu_trap_trail(Projectile *p, complex v, int t) {
+    Projectile *trail = youmu_homing_trail(p, v, t);
+    trail->draw_rule = youmu_trap_draw_trail;
+    trail->color_transform_rule = youmu_trap_trail_clr_transform;
+    trail->args[3] = global.frames - p->birthtime;
+    return trail;
 }
 
 static int youmu_trap(Projectile *p, int t) {
@@ -103,34 +164,47 @@ static int youmu_trap(Projectile *p, int t) {
         return ACTION_DESTROY;
     }
 
+    if(t < 0) {
+        return 1;
+    }
+
+    float charge = youmu_trap_charge(t);
+
     if(!(global.plr.inputflags & INFLAG_FOCUS)) {
         PARTICLE("blast", p->pos, 0, blast_timeout, { 20 }, .draw_rule = Blast);
         PARTICLE("blast", p->pos, 0, blast_timeout, { 23 }, .draw_rule = Blast);
 
-        int cnt = creal(p->args[2]);
+        int cnt = rint(creal(p->args[2]) * (0.25 + 0.75 * charge));
         int dmg = cimag(p->args[2]);
-        int dur = 45 + 10 * nfrand(); // creal(p->args[3]) + nfrand() * cimag(p->args[3]);
         complex aim = p->args[3];
 
         for(int i = 0; i < cnt; ++i) {
+            int dur = 55 + 20 * nfrand();
             float a = (i / (float)cnt) * M_PI * 2;
             complex dir = cexp(I*(a));
 
-            PROJECTILE("hghost", p->pos, rgb(1, 1, 1), youmu_homing,
-                .args = { 5 * dir, aim, dur, global.plr.pos },
+            PROJECTILE("youmu", p->pos, rgb(1, 1, 1), youmu_homing,
+                .args = { 5 * dir, aim, dur + charge*I, global.plr.pos },
                 .type = PlrProj + dmg,
-                .draw_rule = youmu_homing_draw_proj,
-                .color_transform_rule = proj_clrtransform_particle,
+                .draw_rule = youmu_trap_draw_child_proj,
+                .color_transform_rule = youmu_trap_proj_clr_transform,
+                .flags = PFLAG_DRAWADD,
             );
         }
 
+        // TODO: dedicated sound for this?
+        play_sound("enemydeath");
+        play_sound("hit");
+
+        // petal_explosion_ex(cnt, p->pos, 2, 0.5, 0.2, 0.05);
         return ACTION_DESTROY;
     }
 
     p->angle = global.frames + t;
     p->pos += p->args[0] * (0.01 + 0.99 * max(0, (10 - t) / 10.0));
 
-    youmu_homing_trail(p, cexp(I*p->angle), 30);
+    youmu_trap_trail(p, cexp(I*p->angle), 30 * (1 + charge))->flags |= PFLAG_DRAWADD;
+    youmu_trap_trail(p, cexp(I*-p->angle), 30);
     return 1;
 }
 
@@ -211,29 +285,37 @@ static int youmu_slash(Enemy *e, int t) {
     return player_run_bomb_logic(&global.plr, e, &e->args[3], youmu_slash_logic);
 }
 
+static int youmu_linear(Projectile *p, int t) {
+    int r = asymptotic(p, t);
+
+    if(t >= 0) {
+        youmu_homing_trail(p, cexp(I*p->angle), 5);
+    }
+
+    return r;
+}
+
 static void youmu_haunting_power_shot(Player *plr, int p) {
     int d = -2;
-    double spread = 2;
-    // complex aim = (0.5 + 0.1 * p) + (0.1 - p * 0.025) * I;
-    double speed = 10;
+    double spread = 0.5 * (1 + 0.25 * sin(global.frames/10.0));
+    double speed = 8;
 
     if(2 * plr->power / 100 < p || (global.frames + d * p) % 12) {
         return;
     }
 
     float np = (float)p / (2 * plr->power / 100);
-    log_debug("%i %f", p, np);
-
-    Texture *t = get_tex("proj/hghost");
 
     for(int sign = -1; sign < 2; sign += 2) {
+        complex dir = cexp(I*carg(sign*p*spread-speed*I));
+
         PROJECTILE(
-            .texture_ptr = t,
+            .texture = "hghost",
             .pos =  plr->pos,
-            .rule = linear,
-            .color = rgba(0.8, 1.0, 0.5+0.5*np, 1.0),
+            .rule = youmu_linear,
+            .color = rgba(0.8 + 0.2 * (1-np), 1.0, 0.9 + 0.1 * sqrt(1-np), 1.0),
             .draw_rule = youmu_homing_draw_proj,
-            .args = { speed * cexp(I*carg(sign*p*spread-speed*I)), /*aim, 60, VIEWPORT_W*0.5*/ },
+            .args = { speed * dir * (1 - 0.25 * (1 - np)), 3 * (1 - pow(1 - np, 2)), 60, },
             .type = PlrProj+30,
             .color_transform_rule = proj_clrtransform_particle,
         );
@@ -248,14 +330,14 @@ static void youmu_haunting_shot(Player *plr) {
             int pwr = plr->power / 100;
 
             if(!(global.frames % (45 - 4 * pwr))) {
-                int pcnt = 10 + pwr * 4;
+                int pcnt = 11 + pwr * 4;
                 int pdmg = 120 - 18 * 4 * (1 - pow(1 - pwr / 4.0, 1.5));
                 complex aim = 0.75;
 
                 PROJECTILE("youhoming", plr->pos, rgb(1, 1, 1), youmu_trap,
                     .args = { -30.0*I, 120, pcnt+pdmg*I, aim },
                     .type = PlrProj+1000,
-                    .color_transform_rule = proj_clrtransform_particle,
+                    .color_transform_rule = youmu_trap_clr_transform,
                 );
             }
         } else {
