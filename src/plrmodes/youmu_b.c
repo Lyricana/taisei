@@ -16,7 +16,7 @@ static complex youmu_homing_target(complex org, complex fallback) {
     double mindst = DBL_MAX;
     complex target = fallback;
 
-    if(global.boss) {
+    if(global.boss && boss_is_vulnerable(global.boss)) {
         target = global.boss->pos;
         mindst = cabs(target - org);
     }
@@ -213,13 +213,16 @@ static int youmu_slash(Enemy *e, int t) {
 
 static void youmu_haunting_power_shot(Player *plr, int p) {
     int d = -2;
-    double spread = 4;
-    complex aim = (0.5 + 0.1 * p) + (0.1 - p * 0.025) * I;
+    double spread = 2;
+    // complex aim = (0.5 + 0.1 * p) + (0.1 - p * 0.025) * I;
     double speed = 10;
 
-    if(plr->power / 100 < p || (global.frames + d * p) % 12) {
+    if(2 * plr->power / 100 < p || (global.frames + d * p) % 12) {
         return;
     }
+
+    float np = (float)p / (2 * plr->power / 100);
+    log_debug("%i %f", p, np);
 
     Texture *t = get_tex("proj/hghost");
 
@@ -227,10 +230,11 @@ static void youmu_haunting_power_shot(Player *plr, int p) {
         PROJECTILE(
             .texture_ptr = t,
             .pos =  plr->pos,
-            .rule = youmu_homing,
+            .rule = linear,
+            .color = rgba(0.8, 1.0, 0.5+0.5*np, 1.0),
             .draw_rule = youmu_homing_draw_proj,
-            .args = { speed * cexp(I*carg(sign*p*spread-speed*I)), aim, 60, VIEWPORT_W*0.5 },
-            .type = PlrProj+54,
+            .args = { speed * cexp(I*carg(sign*p*spread-speed*I)), /*aim, 60, VIEWPORT_W*0.5*/ },
+            .type = PlrProj+30,
             .color_transform_rule = proj_clrtransform_particle,
         );
     }
@@ -244,7 +248,7 @@ static void youmu_haunting_shot(Player *plr) {
             int pwr = plr->power / 100;
 
             if(!(global.frames % (45 - 4 * pwr))) {
-                int pcnt = 11 + pwr * 4;
+                int pcnt = 10 + pwr * 4;
                 int pdmg = 120 - 18 * 4 * (1 - pow(1 - pwr / 4.0, 1.5));
                 complex aim = 0.75;
 
@@ -257,13 +261,13 @@ static void youmu_haunting_shot(Player *plr) {
         } else {
             if(!(global.frames % 6)) {
                 PROJECTILE("hghost", plr->pos, rgb(0.75, 0.9, 1), youmu_homing,
-                    .args = { -10.0*I, 0.25 + 0.1*I, 60, VIEWPORT_W*0.5 },
+                    .args = { -10.0*I, 0.1 + 0.2*I, 60, VIEWPORT_W*0.5 },
                     .type = PlrProj+120,
                     .color_transform_rule = proj_clrtransform_particle,
                 );
             }
 
-            for(int p = 1; p <= PLR_MAX_POWER/100; ++p) {
+            for(int p = 1; p <= 2*PLR_MAX_POWER/100; ++p) {
                 youmu_haunting_power_shot(plr, p);
             }
         }
