@@ -403,7 +403,7 @@ int asymptotic(Projectile *p, int t) { // v = a[0]*(a[1] + 1); a[1] -> 0
 		return 1;
 	p->angle = carg(p->args[0]);
 
-	p->args[1] = I*cimag(p->args[1]) + creal(p->args[1]) * 0.8;
+	p->args[1] *= 0.8;
 	p->pos += p->args[0]*(p->args[1] + 1);
 
 	return 1;

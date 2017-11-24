@@ -285,14 +285,17 @@ static int youmu_slash(Enemy *e, int t) {
     return player_run_bomb_logic(&global.plr, e, &e->args[3], youmu_slash_logic);
 }
 
-static int youmu_linear(Projectile *p, int t) {
-    int r = asymptotic(p, t);
-
-    if(t >= 0) {
-        youmu_homing_trail(p, cexp(I*p->angle), 5);
+static int youmu_asymptotic(Projectile *p, int t) {
+    if(t < 0) {
+        return 1;
     }
 
-    return r;
+    p->angle = carg(p->args[0]);
+    p->args[1] *= 0.8;
+    p->pos += p->args[0] * (p->args[1] + 1);
+
+    youmu_homing_trail(p, cexp(I*p->angle), 5);
+    return 1;
 }
 
 static void youmu_haunting_power_shot(Player *plr, int p) {
@@ -312,7 +315,7 @@ static void youmu_haunting_power_shot(Player *plr, int p) {
         PROJECTILE(
             .texture = "hghost",
             .pos =  plr->pos,
-            .rule = youmu_linear,
+            .rule = youmu_asymptotic,
             .color = rgba(0.8 + 0.2 * (1-np), 1.0, 0.9 + 0.1 * sqrt(1-np), 1.0),
             .draw_rule = youmu_homing_draw_proj,
             .args = { speed * dir * (1 - 0.25 * (1 - np)), 3 * (1 - pow(1 - np, 2)), 60, },
